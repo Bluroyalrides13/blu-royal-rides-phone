@@ -1,7 +1,6 @@
 const express = require('express');
 const twilio = require('twilio');
 const axios = require('axios');
-require('dotenv').config();
 
 const app = express();
 app.use(express.json());
@@ -25,13 +24,10 @@ function generateBookingCode() {
 }
 
 // Voice endpoint
-// Voice endpoint
 app.all('/voice', (req, res) => {
     // Twilio sends data in both body and query parameters
     const fromNumber = req.body.From || req.query.From || 'Unknown';
     console.log('📞 Call received from:', fromNumber);
-    console.log('Request body:', req.body);
-    console.log('Request query:', req.query);
     
     const twiml = new twilio.twiml.VoiceResponse();
     const gather = twiml.gather({
@@ -50,7 +46,10 @@ app.all('/voice', (req, res) => {
 
 // Menu handler
 app.post('/menu', (req, res) => {
-    const { Digits, From, CallSid } = req.body;
+    const Digits = req.body.Digits || req.query.Digits;
+    const From = req.body.From || req.query.From;
+    const CallSid = req.body.CallSid || req.query.CallSid;
+    
     console.log(`Menu choice: ${Digits} from ${From}`);
     
     const twiml = new twilio.twiml.VoiceResponse();
@@ -96,7 +95,8 @@ app.post('/menu', (req, res) => {
 
 // Get pickup
 app.post('/get-pickup', (req, res) => {
-    const { SpeechResult, CallSid } = req.body;
+    const SpeechResult = req.body.SpeechResult || req.query.SpeechResult;
+    const CallSid = req.body.CallSid || req.query.CallSid;
     const call = activeCalls.get(CallSid);
     
     if (!SpeechResult) {
@@ -130,7 +130,8 @@ app.post('/get-pickup', (req, res) => {
 
 // Get destination
 app.post('/get-destination', (req, res) => {
-    const { SpeechResult, CallSid } = req.body;
+    const SpeechResult = req.body.SpeechResult || req.query.SpeechResult;
+    const CallSid = req.body.CallSid || req.query.CallSid;
     const call = activeCalls.get(CallSid);
     
     if (!SpeechResult) {
@@ -175,7 +176,9 @@ app.post('/get-destination', (req, res) => {
 
 // Get hours for hourly service
 app.post('/get-hours', (req, res) => {
-    const { Digits, SpeechResult, CallSid } = req.body;
+    const Digits = req.body.Digits || req.query.Digits;
+    const SpeechResult = req.body.SpeechResult || req.query.SpeechResult;
+    const CallSid = req.body.CallSid || req.query.CallSid;
     const call = activeCalls.get(CallSid);
     
     let hours = 1;
@@ -206,7 +209,8 @@ app.post('/get-hours', (req, res) => {
 
 // Get name
 app.post('/get-name', (req, res) => {
-    const { SpeechResult, CallSid } = req.body;
+    const SpeechResult = req.body.SpeechResult || req.query.SpeechResult;
+    const CallSid = req.body.CallSid || req.query.CallSid;
     const call = activeCalls.get(CallSid);
     
     if (!SpeechResult) {
@@ -240,7 +244,8 @@ app.post('/get-name', (req, res) => {
 
 // Get email and complete booking
 app.post('/get-email', async (req, res) => {
-    const { SpeechResult, CallSid } = req.body;
+    const SpeechResult = req.body.SpeechResult || req.query.SpeechResult;
+    const CallSid = req.body.CallSid || req.query.CallSid;
     const call = activeCalls.get(CallSid);
     
     if (!SpeechResult) {
