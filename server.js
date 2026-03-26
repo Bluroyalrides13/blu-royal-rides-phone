@@ -6,6 +6,7 @@ require('dotenv').config();
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.text({ type: 'application/xml' }));
 
 // Your Google Script URL from Wix
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwXUshIdn0IWO90RR9Ydp94SHHLu59pTEz59HSfP_A3Iw2bg2yHnE6iMJsSENbYtpzY/exec";
@@ -24,8 +25,13 @@ function generateBookingCode() {
 }
 
 // Voice endpoint
+// Voice endpoint
 app.all('/voice', (req, res) => {
-    console.log('📞 Call received from:', req.body.From || 'Unknown');
+    // Twilio sends data in both body and query parameters
+    const fromNumber = req.body.From || req.query.From || 'Unknown';
+    console.log('📞 Call received from:', fromNumber);
+    console.log('Request body:', req.body);
+    console.log('Request query:', req.query);
     
     const twiml = new twilio.twiml.VoiceResponse();
     const gather = twiml.gather({
