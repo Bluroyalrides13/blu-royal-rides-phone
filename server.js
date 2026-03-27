@@ -35,12 +35,10 @@ app.post('/voice', (req, res) => {
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const twiml = new VoiceResponse();
     
-    // Add a small pause before greeting
-    twiml.pause({ length: 1 });
-    
+    // Use simple DTMF input only (button presses)
     const gather = twiml.gather({
-        input: 'dtmf speech',
-        timeout: 15,
+        input: 'dtmf',
+        timeout: 10,
         numDigits: 1,
         action: '/menu',
         method: 'POST'
@@ -48,9 +46,10 @@ app.post('/voice', (req, res) => {
     
     gather.say('Welcome to Blu Royal Rides. Press 1 for One Way trip. Press 2 for Hourly service.');
     
-    // If no input after timeout
-    twiml.say('I didn\'t hear a selection. Please call again.');
-    twiml.hangup();
+    // If no button pressed, repeat
+    const redirect = twiml.redirect();
+    redirect.method('POST');
+    redirect('/voice');
     
     res.type('text/xml');
     res.send(twiml.toString());
@@ -61,31 +60,19 @@ app.post('/voice', (req, res) => {
 // ============================================
 app.post('/menu', (req, res) => {
     console.log('=== MENU HANDLER CALLED ===');
-    console.log('Digits:', req.body.Digits);
-    console.log('SpeechResult:', req.body.SpeechResult);
+    console.log('Digits pressed:', req.body.Digits);
     console.log('From:', req.body.From);
     console.log('CallSid:', req.body.CallSid);
     
     const Digits = req.body.Digits;
-    const SpeechResult = req.body.SpeechResult;
     const From = req.body.From;
     const CallSid = req.body.CallSid;
     
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const twiml = new VoiceResponse();
     
-    // Determine choice from DTMF or speech
-    let choice = Digits;
-    if (!choice && SpeechResult) {
-        const speech = SpeechResult.toLowerCase();
-        if (speech.includes('one') || speech.includes('1')) choice = '1';
-        if (speech.includes('two') || speech.includes('2') || speech.includes('hour')) choice = '2';
-    }
-    
-    console.log(`Choice detected: ${choice}`);
-    
-    if (choice === '1') {
-        // One Way Service - get pickup location
+    if (Digits === '1') {
+        // One Way Service
         const gather = twiml.gather({
             input: 'speech',
             timeout: 10,
@@ -100,8 +87,8 @@ app.post('/menu', (req, res) => {
             callSid: CallSid
         });
         
-    } else if (choice === '2') {
-        // Hourly Service - get hours
+    } else if (Digits === '2') {
+        // Hourly Service
         const gather = twiml.gather({
             input: 'speech dtmf',
             timeout: 10,
@@ -117,8 +104,8 @@ app.post('/menu', (req, res) => {
         });
         
     } else {
-        // No valid input
-        twiml.say('Invalid selection. Please call again.');
+        // Invalid selection
+        twiml.say('Invalid selection. Goodbye.');
         twiml.hangup();
     }
     
@@ -127,7 +114,7 @@ app.post('/menu', (req, res) => {
 });
 
 // ============================================
-// GET PICKUP LOCATION (One Way)
+// GET PICKUP LOCATION
 // ============================================
 app.post('/get-pickup', (req, res) => {
     console.log('=== GET PICKUP CALLED ===');
@@ -169,7 +156,7 @@ app.post('/get-pickup', (req, res) => {
 });
 
 // ============================================
-// GET DESTINATION (One Way)
+// GET DESTINATION
 // ============================================
 app.post('/get-destination', (req, res) => {
     console.log('=== GET DESTINATION CALLED ===');
@@ -195,7 +182,7 @@ app.post('/get-destination', (req, res) => {
     
     call.destination = SpeechResult;
     
-    // Calculate price based on distance (using 25 miles as example)
+    // Calculate price (using 25 miles as example)
     const distance = 25;
     let mileageRate = 1.80;
     if (distance > 150) mileageRate = 2.80;
@@ -226,8 +213,6 @@ app.post('/get-destination', (req, res) => {
 // ============================================
 app.post('/get-hours', (req, res) => {
     console.log('=== GET HOURS CALLED ===');
-    console.log('Digits:', req.body.Digits);
-    console.log('SpeechResult:', req.body.SpeechResult);
     
     const Digits = req.body.Digits;
     const SpeechResult = req.body.SpeechResult;
@@ -262,7 +247,7 @@ app.post('/get-hours', (req, res) => {
 });
 
 // ============================================
-// GET CUSTOMER NAME
+// GET NAME
 // ============================================
 app.post('/get-name', (req, res) => {
     console.log('=== GET NAME CALLED ===');
@@ -377,20 +362,6 @@ app.get('/health', (req, res) => {
         service: 'Blu Royal Rides Phone System',
         time: new Date().toISOString()
     });
-});
-
-// ============================================
-// SIMPLE TEST ENDPOINT
-// ============================================
-app.get('/ping', (req, res) => {
-    res.send('pong');
-});
-
-// ============================================
-// HELLO TEST ENDPOINT
-// ============================================
-app.get('/hello', (req, res) => {
-    res.send('Hello from Blu Royal Rides!');
 });
 
 // ============================================
