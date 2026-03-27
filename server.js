@@ -4,7 +4,7 @@ const axios = require('axios');
 
 const app = express();
 
-// IMPORTANT: Twilio sends data as x-www-form-urlencoded
+// Parse incoming requests
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
@@ -24,21 +24,23 @@ function generateBookingCode() {
     return `BRR-${random}`;
 }
 
-// Voice endpoint - FIXED with better error handling
+// ============================================
+// VOICE ENDPOINT - Answers the phone
+// ============================================
 app.post('/voice', (req, res) => {
     console.log('=== VOICE ENDPOINT CALLED ===');
-    console.log('Headers:', req.headers);
-    console.log('Body:', req.body);
-    
-    // Twilio sends data in the body as form data
     const fromNumber = req.body.From || 'Unknown';
     console.log('📞 Call received from:', fromNumber);
     
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const twiml = new VoiceResponse();
+    
+    // Add a small pause before greeting
+    twiml.pause({ length: 1 });
+    
     const gather = twiml.gather({
-        input: 'speech dtmf',
-        timeout: 3,
+        input: 'dtmf speech',
+        timeout: 10,
         numDigits: 1,
         action: '/menu',
         method: 'POST'
@@ -46,28 +48,43 @@ app.post('/voice', (req, res) => {
     
     gather.say('Welcome to Blu Royal Rides. Press 1 for One Way trip. Press 2 for Hourly service.');
     
+    // If no input, repeat the message
+    twiml.redirect('/voice');
+    
     res.type('text/xml');
     res.send(twiml.toString());
 });
 
-// Menu handler
+// ============================================
+// MENU HANDLER - Process the menu choice
+// ============================================
 app.post('/menu', (req, res) => {
     console.log('=== MENU HANDLER CALLED ===');
-    console.log('Body:', req.body);
+    console.log('Request body:', req.body);
     
     const Digits = req.body.Digits;
+    const SpeechResult = req.body.SpeechResult;
     const From = req.body.From;
     const CallSid = req.body.CallSid;
     
-    console.log(`Menu choice: ${Digits} from ${From}`);
+    // Determine choice from DTMF or speech
+    let choice = Digits;
+    if (!choice && SpeechResult) {
+        const speech = SpeechResult.toLowerCase();
+        if (speech.includes('one') || speech.includes('1')) choice = '1';
+        if (speech.includes('two') || speech.includes('2') || speech.includes('hour')) choice = '2';
+    }
+    
+    console.log(`Choice: ${choice} from ${From}`);
     
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const twiml = new VoiceResponse();
     
-    if (Digits === '1') {
+    if (choice === '1') {
+        // One Way Service
         const gather = twiml.gather({
             input: 'speech',
-            timeout: 5,
+            timeout: 10,
             action: '/get-pickup',
             method: 'POST'
         });
@@ -79,10 +96,11 @@ app.post('/menu', (req, res) => {
             callSid: CallSid
         });
         
-    } else if (Digits === '2') {
+    } else if (choice === '2') {
+        // Hourly Service
         const gather = twiml.gather({
             input: 'speech dtmf',
-            timeout: 5,
+            timeout: 10,
             action: '/get-hours',
             method: 'POST'
         });
@@ -95,15 +113,25 @@ app.post('/menu', (req, res) => {
         });
         
     } else {
-        twiml.say('Invalid selection. Goodbye.');
-        twiml.hangup();
+        // No valid input, try again
+        const gather = twiml.gather({
+            input: 'dtmf speech',
+            timeout: 10,
+            numDigits: 1,
+            action: '/menu',
+            method: 'POST'
+        });
+        gather.say('I didn\'t catch that. Press 1 for One Way trip. Press 2 for Hourly service.');
+        twiml.redirect('/menu');
     }
     
     res.type('text/xml');
     res.send(twiml.toString());
 });
 
-// Get pickup
+// ============================================
+// GET PICKUP LOCATION (One Way)
+// ============================================
 app.post('/get-pickup', (req, res) => {
     console.log('=== GET PICKUP CALLED ===');
     const SpeechResult = req.body.SpeechResult;
@@ -115,7 +143,7 @@ app.post('/get-pickup', (req, res) => {
         const twiml = new VoiceResponse();
         const gather = twiml.gather({
             input: 'speech',
-            timeout: 3,
+            timeout: 10,
             action: '/get-pickup',
             method: 'POST'
         });
@@ -131,7 +159,7 @@ app.post('/get-pickup', (req, res) => {
     const twiml = new VoiceResponse();
     const gather = twiml.gather({
         input: 'speech',
-        timeout: 5,
+        timeout: 10,
         action: '/get-destination',
         method: 'POST'
     });
@@ -141,7 +169,9 @@ app.post('/get-pickup', (req, res) => {
     res.send(twiml.toString());
 });
 
-// Get destination
+// ============================================
+// GET DESTINATION (One Way)
+// ============================================
 app.post('/get-destination', (req, res) => {
     console.log('=== GET DESTINATION CALLED ===');
     const SpeechResult = req.body.SpeechResult;
@@ -153,7 +183,7 @@ app.post('/get-destination', (req, res) => {
         const twiml = new VoiceResponse();
         const gather = twiml.gather({
             input: 'speech',
-            timeout: 3,
+            timeout: 10,
             action: '/get-destination',
             method: 'POST'
         });
@@ -164,8 +194,8 @@ app.post('/get-destination', (req, res) => {
     
     call.destination = SpeechResult;
     
-    // Simple pricing calculation (using 25 miles as example)
-    const distance = 25;
+    // Calculate price based on distance
+    const distance = 25; // miles (you can add real distance calculation later)
     let mileageRate = 1.80;
     if (distance > 150) mileageRate = 2.80;
     else if (distance > 100) mileageRate = 2.40;
@@ -180,7 +210,7 @@ app.post('/get-destination', (req, res) => {
     const twiml = new VoiceResponse();
     const gather = twiml.gather({
         input: 'speech',
-        timeout: 5,
+        timeout: 10,
         action: '/get-name',
         method: 'POST'
     });
@@ -190,7 +220,9 @@ app.post('/get-destination', (req, res) => {
     res.send(twiml.toString());
 });
 
-// Get hours for hourly service
+// ============================================
+// GET HOURS (Hourly Service)
+// ============================================
 app.post('/get-hours', (req, res) => {
     console.log('=== GET HOURS CALLED ===');
     const Digits = req.body.Digits;
@@ -215,7 +247,7 @@ app.post('/get-hours', (req, res) => {
     const twiml = new VoiceResponse();
     const gather = twiml.gather({
         input: 'speech',
-        timeout: 5,
+        timeout: 10,
         action: '/get-name',
         method: 'POST'
     });
@@ -225,7 +257,9 @@ app.post('/get-hours', (req, res) => {
     res.send(twiml.toString());
 });
 
-// Get name
+// ============================================
+// GET CUSTOMER NAME
+// ============================================
 app.post('/get-name', (req, res) => {
     console.log('=== GET NAME CALLED ===');
     const SpeechResult = req.body.SpeechResult;
@@ -237,7 +271,7 @@ app.post('/get-name', (req, res) => {
         const twiml = new VoiceResponse();
         const gather = twiml.gather({
             input: 'speech',
-            timeout: 3,
+            timeout: 10,
             action: '/get-name',
             method: 'POST'
         });
@@ -253,7 +287,7 @@ app.post('/get-name', (req, res) => {
     const twiml = new VoiceResponse();
     const gather = twiml.gather({
         input: 'speech dtmf',
-        timeout: 5,
+        timeout: 10,
         action: '/get-email',
         method: 'POST'
     });
@@ -263,7 +297,9 @@ app.post('/get-name', (req, res) => {
     res.send(twiml.toString());
 });
 
-// Get email and complete booking
+// ============================================
+// GET EMAIL AND COMPLETE BOOKING
+// ============================================
 app.post('/get-email', async (req, res) => {
     console.log('=== GET EMAIL CALLED ===');
     const SpeechResult = req.body.SpeechResult;
@@ -275,7 +311,7 @@ app.post('/get-email', async (req, res) => {
         const twiml = new VoiceResponse();
         const gather = twiml.gather({
             input: 'speech dtmf',
-            timeout: 3,
+            timeout: 10,
             action: '/get-email',
             method: 'POST'
         });
@@ -324,7 +360,9 @@ app.post('/get-email', async (req, res) => {
     activeCalls.delete(CallSid);
 });
 
-// Health check
+// ============================================
+// HEALTH CHECK
+// ============================================
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'online',
@@ -333,16 +371,23 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Simple test endpoint
+// ============================================
+// PING TEST
+// ============================================
 app.get('/ping', (req, res) => {
     res.send('pong');
 });
 
-// Root endpoint
+// ============================================
+// ROOT ENDPOINT
+// ============================================
 app.get('/', (req, res) => {
     res.send('Blu Royal Rides Phone System is running!');
 });
 
+// ============================================
+// START SERVER
+// ============================================
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚗 Blu Royal Rides Phone System Running`);
