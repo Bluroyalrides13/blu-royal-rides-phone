@@ -9,6 +9,9 @@ app.use(express.json());
 // Your Google Script URL from Wix
 const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwXUshIdn0IWO90RR9Ydp94SHHLu59pTEz59HSfP_A3Iw2bg2yHnE6iMJsSENbYtpzY/exec";
 
+// Your Google Maps API Key
+const GOOGLE_MAPS_API_KEY = "AIzaSyAWXVHBwe-u1ZVKhD6A7jjqY09UVyQQgLI";
+
 // Pricing formulas
 const BASE_FARE = 125.00;
 const HOURLY_RATE = 125.00;
@@ -20,6 +23,35 @@ const activeCalls = new Map();
 function generateBookingCode() {
     const random = Math.random().toString(36).slice(2, 8).toUpperCase();
     return `BRR-${random}`;
+}
+
+// Calculate price based on distance in miles
+function calculatePrice(distance) {
+    let mileageRate = 1.80;
+    if (distance > 150) mileageRate = 2.80;
+    else if (distance > 100) mileageRate = 2.40;
+    else if (distance > 50) mileageRate = 2.00;
+    
+    const total = BASE_FARE + (distance * mileageRate);
+    return total;
+}
+
+// Get distance from Google Maps
+async function getDistance(pickup, dropoff) {
+    try {
+        const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(pickup)}&destinations=${encodeURIComponent(dropoff)}&units=imperial&key=${GOOGLE_MAPS_API_KEY}`;
+        const response = await axios.get(url);
+        
+        if (response.data.rows[0] && response.data.rows[0].elements[0] && response.data.rows[0].elements[0].distance) {
+            const miles = response.data.rows[0].elements[0].distance.text;
+            const milesValue = parseFloat(miles.split(' ')[0]);
+            return milesValue;
+        }
+        return 25; // Default distance if calculation fails
+    } catch (error) {
+        console.error('Distance calculation error:', error.message);
+        return 25; // Default distance
+    }
 }
 
 // ============================================
@@ -77,8 +109,21 @@ app.post('/menu', (req, res) => {
         });
         
     } else if (Digits === '2') {
-        twiml.say('Hourly service selected. Thank you for calling Blu Royal Rides!');
-        twiml.hangup();
+        // Hourly service
+        const gather = twiml.gather({
+            input: 'speech dtmf',
+            timeout: 10,
+            action: '/get-hours',
+            method: 'POST'
+        });
+        gather.say('How many hours will you need the vehicle?');
+        
+        activeCalls.set(CallSid, {
+            phoneNumber: From,
+            serviceType: 'hourly',
+            callSid: CallSid,
+            step: 'hours'
+        });
         
     } else {
         twiml.say('Invalid selection. Goodbye.');
@@ -116,7 +161,7 @@ app.post('/get-pickup', (req, res) => {
     call.step = 'destination';
     activeCalls.set(CallSid, call);
     
-    // Now ask for destination
+    // Ask for destination
     const twiml = new twilio.twiml.VoiceResponse();
     const gather = twiml.gather({
         input: 'speech',
@@ -133,7 +178,7 @@ app.post('/get-pickup', (req, res) => {
 // ============================================
 // GET DESTINATION
 // ============================================
-app.post('/get-destination', (req, res) => {
+app.post('/get-destination', async (req, res) => {
     console.log('Destination:', req.body.SpeechResult);
     
     const SpeechResult = req.body.SpeechResult;
@@ -155,15 +200,52 @@ app.post('/get-destination', (req, res) => {
     
     call.destination = SpeechResult;
     
-    // Calculate price (using 25 miles as example)
-    const distance = 25;
-    let mileageRate = 1.80;
-    if (distance > 150) mileageRate = 2.80;
-    else if (distance > 100) mileageRate = 2.40;
-    else if (distance > 50) mileageRate = 2.00;
-    
-    const total = BASE_FARE + (distance * mileageRate);
+    // Calculate distance using Google Maps
+    const distance = await getDistance(call.pickup, call.destination);
+    const total = calculatePrice(distance);
+    call.distance = distance;
     call.price = total;
+    call.step = 'datetime';
+    activeCalls.set(CallSid, call);
+    
+    // Ask for date and time
+    const twiml = new twilio.twiml.VoiceResponse();
+    const gather = twiml.gather({
+        input: 'speech',
+        timeout: 10,
+        action: '/get-datetime',
+        method: 'POST'
+    });
+    gather.say(`The distance is ${distance.toFixed(1)} miles. The estimated fare is $${total.toFixed(2)}. Please tell me your pickup date and time.`);
+    
+    res.type('text/xml');
+    res.send(twiml.toString());
+});
+
+// ============================================
+// GET DATE AND TIME
+// ============================================
+app.post('/get-datetime', (req, res) => {
+    console.log('Date/Time:', req.body.SpeechResult);
+    
+    const SpeechResult = req.body.SpeechResult;
+    const CallSid = req.body.CallSid;
+    const call = activeCalls.get(CallSid);
+    
+    if (!SpeechResult) {
+        const twiml = new twilio.twiml.VoiceResponse();
+        const gather = twiml.gather({
+            input: 'speech',
+            timeout: 10,
+            action: '/get-datetime',
+            method: 'POST'
+        });
+        gather.say('Please tell me your pickup date and time.');
+        res.type('text/xml');
+        return res.send(twiml.toString());
+    }
+    
+    call.datetime = SpeechResult;
     call.step = 'name';
     activeCalls.set(CallSid, call);
     
@@ -175,7 +257,87 @@ app.post('/get-destination', (req, res) => {
         action: '/get-name',
         method: 'POST'
     });
-    gather.say(`The estimated fare is $${total.toFixed(2)}. Please tell me your full name.`);
+    gather.say('Please tell me your full name.');
+    
+    res.type('text/xml');
+    res.send(twiml.toString());
+});
+
+// ============================================
+// GET HOURS (Hourly Service)
+// ============================================
+app.post('/get-hours', (req, res) => {
+    console.log('Hours:', req.body.Digits);
+    
+    const Digits = req.body.Digits;
+    const SpeechResult = req.body.SpeechResult;
+    const CallSid = req.body.CallSid;
+    const call = activeCalls.get(CallSid);
+    
+    let hours = 1;
+    if (Digits) {
+        hours = parseInt(Digits);
+    } else if (SpeechResult) {
+        const match = SpeechResult.match(/(\d+)/);
+        if (match) hours = parseInt(match[1]);
+    }
+    
+    call.hours = hours;
+    const total = hours * HOURLY_RATE;
+    call.price = total;
+    call.step = 'datetime';
+    activeCalls.set(CallSid, call);
+    
+    // Ask for date and time
+    const twiml = new twilio.twiml.VoiceResponse();
+    const gather = twiml.gather({
+        input: 'speech',
+        timeout: 10,
+        action: '/get-datetime-hourly',
+        method: 'POST'
+    });
+    gather.say(`The estimated fare is $${total.toFixed(2)} for ${hours} hours. Please tell me your pickup date and time.`);
+    
+    res.type('text/xml');
+    res.send(twiml.toString());
+});
+
+// ============================================
+// GET DATE AND TIME (Hourly)
+// ============================================
+app.post('/get-datetime-hourly', (req, res) => {
+    console.log('Date/Time:', req.body.SpeechResult);
+    
+    const SpeechResult = req.body.SpeechResult;
+    const CallSid = req.body.CallSid;
+    const call = activeCalls.get(CallSid);
+    
+    if (!SpeechResult) {
+        const twiml = new twilio.twiml.VoiceResponse();
+        const gather = twiml.gather({
+            input: 'speech',
+            timeout: 10,
+            action: '/get-datetime-hourly',
+            method: 'POST'
+        });
+        gather.say('Please tell me your pickup date and time.');
+        res.type('text/xml');
+        return res.send(twiml.toString());
+    }
+    
+    call.datetime = SpeechResult;
+    call.step = 'name';
+    activeCalls.set(CallSid, call);
+    
+    // Ask for name
+    const twiml = new twilio.twiml.VoiceResponse();
+    const gather = twiml.gather({
+        input: 'speech',
+        timeout: 10,
+        action: '/get-name',
+        method: 'POST'
+    });
+    gather.say('Please tell me your full name.');
     
     res.type('text/xml');
     res.send(twiml.toString());
@@ -255,8 +417,9 @@ app.post('/get-email', async (req, res) => {
             bookingCode: bookingCode,
             serviceType: call.serviceType === 'oneWay' ? 'One Way' : 'Hourly',
             fromAddress: call.pickup || 'Not specified',
-            toAddress: call.destination || 'Not specified',
-            dateTime: new Date().toLocaleString(),
+            toAddress: call.destination || `${call.hours} hours`,
+            dateTime: call.datetime || new Date().toLocaleString(),
+            distance: call.distance ? `${call.distance.toFixed(1)} miles` : 'N/A',
             totalFare: call.price.toFixed(2),
             customerName: call.customerName,
             customerEmail: call.customerEmail,
