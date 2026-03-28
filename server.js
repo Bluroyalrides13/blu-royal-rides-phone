@@ -103,7 +103,7 @@ app.post('/no-answer', (req, res) => {
 });
 
 // ============================================
-// MENU HANDLER (One Way & Hourly)
+// MENU HANDLER
 // ============================================
 app.post('/menu', (req, res) => {
     const Digits = req.body.Digits;
@@ -151,7 +151,7 @@ app.post('/menu', (req, res) => {
 });
 
 // ============================================
-// HOURLY SERVICE ENDPOINTS
+// HOURLY SERVICE
 // ============================================
 app.post('/hourly-pickup', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
@@ -249,7 +249,7 @@ app.post('/hourly-agenda', (req, res) => {
 });
 
 // ============================================
-// ONE WAY SERVICE ENDPOINTS
+// ONE WAY SERVICE
 // ============================================
 app.post('/get-pickup', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
