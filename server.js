@@ -30,18 +30,31 @@ function calculatePrice(distance) {
     return BASE_FARE + (distance * rate);
 }
 
+// Get distance from Google Maps - with longer timeout and retry
 async function getDistance(pickup, dropoff) {
     try {
+        console.log(`Calculating distance from: ${pickup} to: ${dropoff}`);
+        
         const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(pickup)}&destinations=${encodeURIComponent(dropoff)}&units=imperial&key=${GOOGLE_MAPS_API_KEY}`;
-        const response = await axios.get(url, { timeout: 3000 });
+        
+        const response = await axios.get(url, { timeout: 8000 }); // 8 second timeout
+        
+        console.log('Google Maps response:', response.data.status);
+        
         const element = response.data.rows[0]?.elements[0];
+        
         if (element && element.status === 'OK' && element.distance) {
             const miles = element.distance.text;
-            return parseFloat(miles.split(' ')[0]);
+            const milesValue = parseFloat(miles.split(' ')[0]);
+            console.log(`Distance found: ${milesValue} miles`);
+            return milesValue;
+        } else {
+            console.log('Distance not found, using fallback');
+            return 15; // Fallback distance
         }
-        return 15;
     } catch (error) {
-        return 15;
+        console.error('Distance error:', error.message);
+        return 15; // Fallback distance
     }
 }
 
@@ -58,13 +71,12 @@ function cleanEmail(speech) {
 }
 
 // ============================================
-// SIMPLE WORKING VOICE ENDPOINT
+// VOICE ENDPOINT
 // ============================================
 app.post('/voice', (req, res) => {
     console.log('Call from:', req.body.From);
     const twiml = new twilio.twiml.VoiceResponse();
     
-    // Simple menu with DTMF only for reliability
     const gather = twiml.gather({
         input: 'dtmf',
         timeout: 5,
@@ -73,9 +85,6 @@ app.post('/voice', (req, res) => {
         method: 'POST'
     });
     gather.say('Welcome to Blu Royal Rides. Press 1 for One Way. Press 2 for Hourly. Press 3 for voicemail.');
-    
-    // If no input, repeat
-    twiml.redirect('/voice');
     
     res.type('text/xml');
     res.send(twiml.toString());
@@ -93,7 +102,6 @@ app.post('/menu', (req, res) => {
     const twiml = new twilio.twiml.VoiceResponse();
     
     if (Digits === '1') {
-        // One Way
         const gather = twiml.gather({
             input: 'speech',
             timeout: 8,
@@ -108,7 +116,6 @@ app.post('/menu', (req, res) => {
         });
         
     } else if (Digits === '2') {
-        // Hourly
         const gather = twiml.gather({
             input: 'speech',
             timeout: 8,
@@ -123,7 +130,6 @@ app.post('/menu', (req, res) => {
         });
         
     } else if (Digits === '3') {
-        // Voicemail with beep
         twiml.say('Leave your message after the beep.');
         twiml.pause({ length: 1 });
         twiml.play('http://www.twilio.com/docs/demos/show_mail_beep');
@@ -198,7 +204,7 @@ app.post('/hourly-hours', (req, res) => {
     
     const twiml = new twilio.twiml.VoiceResponse();
     const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/hourly-datetime', method: 'POST' });
-    gather.say(`$${call.price.toFixed(0)} for ${hours} hours. Please tell me your pickup date and time.`);
+    gather.say(`${hours} hours at $${call.price.toFixed(0)}. Please tell me your pickup date and time.`);
     res.type('text/xml');
     res.send(twiml.toString());
 });
@@ -282,7 +288,7 @@ app.post('/get-pickup', (req, res) => {
 });
 
 // ============================================
-// ONE WAY - DESTINATION
+// ONE WAY - DESTINATION (WITH REAL GOOGLE MAPS DISTANCE)
 // ============================================
 app.post('/get-destination', async (req, res) => {
     const SpeechResult = req.body.SpeechResult;
@@ -299,6 +305,7 @@ app.post('/get-destination', async (req, res) => {
     
     call.destination = SpeechResult;
     
+    // Calculate real distance using Google Maps
     const distance = await getDistance(call.pickup, call.destination);
     const price = calculatePrice(distance);
     call.distance = distance;
@@ -404,7 +411,7 @@ app.post('/get-email', async (req, res) => {
         }
         
         const params = new URLSearchParams(bookingData);
-        await axios.get(`${GOOGLE_SCRIPT_URL}?${params.toString()}`, { timeout: 3000 });
+        await axios.get(`${GOOGLE_SCRIPT_URL}?${params.toString()}`, { timeout: 5000 });
         console.log(`✅ Booking ${bookingCode}`);
     } catch (error) {
         console.error('Sheet error:', error.message);
