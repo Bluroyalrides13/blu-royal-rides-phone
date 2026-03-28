@@ -22,7 +22,6 @@ function generateBookingCode() {
     return `BRR-${random}`;
 }
 
-// Price formula - total price only, no breakdown
 function calculatePrice(distance) {
     let rate = 1.80;
     if (distance > 150) rate = 2.80;
@@ -32,31 +31,22 @@ function calculatePrice(distance) {
     return total;
 }
 
-// Get distance and duration from Google Maps
 async function getDistanceAndDuration(pickup, dropoff) {
     try {
         console.log(`Calculating from: ${pickup} to: ${dropoff}`);
-        
         const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(pickup)}&destinations=${encodeURIComponent(dropoff)}&units=imperial&key=${GOOGLE_MAPS_API_KEY}`;
-        
         const response = await axios.get(url, { timeout: 8000 });
-        
         const element = response.data.rows[0]?.elements[0];
-        
         if (element && element.status === 'OK' && element.distance && element.duration) {
             const miles = element.distance.text;
             const milesValue = parseFloat(miles.split(' ')[0]);
             const durationText = element.duration.text;
-            const durationMinutes = Math.ceil(element.duration.value / 60);
-            console.log(`Distance: ${milesValue} miles, Duration: ${durationMinutes} minutes`);
-            return { distance: milesValue, duration: durationMinutes, durationText: durationText };
+            return { distance: milesValue, duration: durationText };
         } else {
-            console.log('Distance not found, using fallback');
-            return { distance: 15, duration: 30, durationText: '30 minutes' };
+            return { distance: 15, duration: '30 minutes' };
         }
     } catch (error) {
-        console.error('Distance error:', error.message);
-        return { distance: 15, duration: 30, durationText: '30 minutes' };
+        return { distance: 15, duration: '30 minutes' };
     }
 }
 
@@ -93,7 +83,27 @@ app.post('/voice', (req, res) => {
 });
 
 // ============================================
-// MENU HANDLER
+// NO ANSWER - AUTOMATION TAKES OVER
+// ============================================
+app.post('/no-answer', (req, res) => {
+    console.log('No answer on your phone, automation answering');
+    
+    const twiml = new twilio.twiml.VoiceResponse();
+    const gather = twiml.gather({
+        input: 'dtmf',
+        timeout: 5,
+        numDigits: 1,
+        action: '/menu',
+        method: 'POST'
+    });
+    gather.say('Welcome to Blu Royal Rides. Press 1 for One Way. Press 2 for Hourly.');
+    
+    res.type('text/xml');
+    res.send(twiml.toString());
+});
+
+// ============================================
+// MENU HANDLER (One Way & Hourly)
 // ============================================
 app.post('/menu', (req, res) => {
     const Digits = req.body.Digits;
@@ -114,8 +124,7 @@ app.post('/menu', (req, res) => {
         activeCalls.set(CallSid, { 
             phoneNumber: From, 
             serviceType: 'oneWay', 
-            callSid: CallSid,
-            step: 'pickup'
+            callSid: CallSid
         });
         
     } else if (Digits === '2') {
@@ -142,7 +151,7 @@ app.post('/menu', (req, res) => {
 });
 
 // ============================================
-// HOURLY SERVICE
+// HOURLY SERVICE ENDPOINTS
 // ============================================
 app.post('/hourly-pickup', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
@@ -240,7 +249,7 @@ app.post('/hourly-agenda', (req, res) => {
 });
 
 // ============================================
-// ONE WAY - PICKUP
+// ONE WAY SERVICE ENDPOINTS
 // ============================================
 app.post('/get-pickup', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
@@ -256,7 +265,6 @@ app.post('/get-pickup', (req, res) => {
     }
     
     call.pickup = SpeechResult;
-    call.step = 'destination';
     activeCalls.set(CallSid, call);
     
     const twiml = new twilio.twiml.VoiceResponse();
@@ -266,9 +274,6 @@ app.post('/get-pickup', (req, res) => {
     res.send(twiml.toString());
 });
 
-// ============================================
-// ONE WAY - DESTINATION (with total price)
-// ============================================
 app.post('/get-destination', async (req, res) => {
     const SpeechResult = req.body.SpeechResult;
     const CallSid = req.body.CallSid;
@@ -283,16 +288,10 @@ app.post('/get-destination', async (req, res) => {
     }
     
     call.destination = SpeechResult;
-    
-    // Get real distance and duration
     const routeInfo = await getDistanceAndDuration(call.pickup, call.destination);
     call.distance = routeInfo.distance;
-    call.duration = routeInfo.duration;
-    call.durationText = routeInfo.durationText;
-    
-    // Calculate total price (no breakdown)
+    call.durationText = routeInfo.duration;
     call.price = calculatePrice(call.distance);
-    
     activeCalls.set(CallSid, call);
     
     const twiml = new twilio.twiml.VoiceResponse();
@@ -302,9 +301,6 @@ app.post('/get-destination', async (req, res) => {
     res.send(twiml.toString());
 });
 
-// ============================================
-// GET NUMBER OF PASSENGERS
-// ============================================
 app.post('/get-passengers', (req, res) => {
     const Digits = req.body.Digits;
     const SpeechResult = req.body.SpeechResult;
@@ -330,9 +326,6 @@ app.post('/get-passengers', (req, res) => {
     res.send(twiml.toString());
 });
 
-// ============================================
-// GET LUGGAGE AMOUNT
-// ============================================
 app.post('/get-luggage', (req, res) => {
     const Digits = req.body.Digits;
     const SpeechResult = req.body.SpeechResult;
@@ -358,9 +351,6 @@ app.post('/get-luggage', (req, res) => {
     res.send(twiml.toString());
 });
 
-// ============================================
-// GET SPECIAL REQUESTS
-// ============================================
 app.post('/get-special-requests', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
     const CallSid = req.body.CallSid;
@@ -376,9 +366,6 @@ app.post('/get-special-requests', (req, res) => {
     res.send(twiml.toString());
 });
 
-// ============================================
-// ONE WAY - DATETIME
-// ============================================
 app.post('/oneway-datetime', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
     const CallSid = req.body.CallSid;
@@ -403,7 +390,7 @@ app.post('/oneway-datetime', (req, res) => {
 });
 
 // ============================================
-// GET NAME (Common)
+// GET NAME AND EMAIL
 // ============================================
 app.post('/get-name', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
@@ -428,9 +415,6 @@ app.post('/get-name', (req, res) => {
     res.send(twiml.toString());
 });
 
-// ============================================
-// GET EMAIL & COMPLETE
-// ============================================
 app.post('/get-email', async (req, res) => {
     const SpeechResult = req.body.SpeechResult;
     const CallSid = req.body.CallSid;
