@@ -86,7 +86,7 @@ app.post('/voice', (req, res) => {
         action: '/menu',
         method: 'POST'
     });
-    gather.say('Welcome to Blu Royal Rides. Press 1 for One Way. Press 2 for Hourly. Press 3 for voicemail.');
+    gather.say('Welcome to Blu Royal Rides. Press 1 for One Way. Press 2 for Hourly.');
     
     res.type('text/xml');
     res.send(twiml.toString());
@@ -132,24 +132,8 @@ app.post('/menu', (req, res) => {
             callSid: CallSid 
         });
         
-    } else if (Digits === '3') {
-        twiml.say('Leave your message after the beep.');
-        twiml.pause({ length: 1 });
-        twiml.play('http://www.twilio.com/docs/demos/show_mail_beep');
-        const gather = twiml.gather({
-            input: 'speech',
-            timeout: 30,
-            action: '/voicemail',
-            method: 'POST'
-        });
-        activeCalls.set(CallSid, { 
-            phoneNumber: From, 
-            serviceType: 'voicemail', 
-            callSid: CallSid 
-        });
-        
     } else {
-        twiml.say('Invalid. Goodbye.');
+        twiml.say('Invalid selection. Goodbye.');
         twiml.hangup();
     }
     
@@ -507,33 +491,6 @@ app.post('/get-email', async (req, res) => {
     res.type('text/xml');
     res.send(twiml.toString());
     activeCalls.delete(CallSid);
-});
-
-// ============================================
-// VOICEMAIL
-// ============================================
-app.post('/voicemail', (req, res) => {
-    const SpeechResult = req.body.SpeechResult;
-    const From = req.body.From;
-    
-    console.log('Voicemail from:', From);
-    console.log('Message:', SpeechResult);
-    
-    try {
-        const params = new URLSearchParams({
-            type: 'voicemail',
-            phoneNumber: From,
-            message: SpeechResult || 'No message',
-            timestamp: new Date().toLocaleString()
-        });
-        axios.get(`${GOOGLE_SCRIPT_URL}?${params.toString()}`);
-    } catch(e) { console.error(e); }
-    
-    const twiml = new twilio.twiml.VoiceResponse();
-    twiml.say('Message saved. We will call you back within 24 hours. Goodbye.');
-    twiml.hangup();
-    res.type('text/xml');
-    res.send(twiml.toString());
 });
 
 // ============================================
