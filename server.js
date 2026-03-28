@@ -17,22 +17,19 @@ const HOURLY_RATE = 125.00;
 // Store active calls
 const activeCalls = new Map();
 
-// Generate booking reference
 function generateBookingCode() {
     const random = Math.random().toString(36).slice(2, 8).toUpperCase();
     return `BRR-${random}`;
 }
 
-// Calculate price based on distance
 function calculatePrice(distance) {
-    let mileageRate = 1.80;
-    if (distance > 150) mileageRate = 2.80;
-    else if (distance > 100) mileageRate = 2.40;
-    else if (distance > 50) mileageRate = 2.00;
-    return BASE_FARE + (distance * mileageRate);
+    let rate = 1.80;
+    if (distance > 150) rate = 2.80;
+    else if (distance > 100) rate = 2.40;
+    else if (distance > 50) rate = 2.00;
+    return BASE_FARE + (distance * rate);
 }
 
-// Get distance from Google Maps - with timeout
 async function getDistance(pickup, dropoff) {
     try {
         const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(pickup)}&destinations=${encodeURIComponent(dropoff)}&units=imperial&key=${GOOGLE_MAPS_API_KEY}`;
@@ -42,14 +39,12 @@ async function getDistance(pickup, dropoff) {
             const miles = element.distance.text;
             return parseFloat(miles.split(' ')[0]);
         }
-        return 15; // Faster default
+        return 15;
     } catch (error) {
-        console.error('Distance error:', error.message);
-        return 15; // Quick default
+        return 15;
     }
 }
 
-// Clean email from speech
 function cleanEmail(speech) {
     let email = speech.toLowerCase()
         .replace(/\s+dot\s+/g, '.')
@@ -59,24 +54,29 @@ function cleanEmail(speech) {
         .replace(/\s+/g, '')
         .replace(/dot/g, '.')
         .replace(/at/g, '@');
-    email = email.replace(/[^a-zA-Z0-9@._-]/g, '');
-    return email;
+    return email.replace(/[^a-zA-Z0-9@._-]/g, '');
 }
 
 // ============================================
-// VOICE ENDPOINT - FAST
+// SIMPLE WORKING VOICE ENDPOINT
 // ============================================
 app.post('/voice', (req, res) => {
     console.log('Call from:', req.body.From);
     const twiml = new twilio.twiml.VoiceResponse();
+    
+    // Simple menu with DTMF only for reliability
     const gather = twiml.gather({
         input: 'dtmf',
-        timeout: 2,
+        timeout: 5,
         numDigits: 1,
         action: '/menu',
         method: 'POST'
     });
-    gather.say('Blu Royal Rides. Press 1 One Way. Press 2 Hourly. Press 3 Voicemail.');
+    gather.say('Welcome to Blu Royal Rides. Press 1 for One Way. Press 2 for Hourly. Press 3 for voicemail.');
+    
+    // If no input, repeat
+    twiml.redirect('/voice');
+    
     res.type('text/xml');
     res.send(twiml.toString());
 });
@@ -89,38 +89,42 @@ app.post('/menu', (req, res) => {
     const From = req.body.From;
     const CallSid = req.body.CallSid;
     
+    console.log('Menu choice:', Digits);
     const twiml = new twilio.twiml.VoiceResponse();
     
     if (Digits === '1') {
+        // One Way
         const gather = twiml.gather({
             input: 'speech',
-            timeout: 5,
+            timeout: 8,
             action: '/get-pickup',
             method: 'POST'
         });
-        gather.say('Pickup address?');
+        gather.say('Please say your pickup address.');
         activeCalls.set(CallSid, { 
             phoneNumber: From, 
             serviceType: 'oneWay', 
-            callSid: CallSid
+            callSid: CallSid 
         });
         
     } else if (Digits === '2') {
+        // Hourly
         const gather = twiml.gather({
             input: 'speech',
-            timeout: 5,
-            action: '/hourly-get-pickup',
+            timeout: 8,
+            action: '/hourly-pickup',
             method: 'POST'
         });
-        gather.say('Pickup location?');
+        gather.say('Please say your pickup address.');
         activeCalls.set(CallSid, { 
             phoneNumber: From, 
             serviceType: 'hourly', 
-            callSid: CallSid
+            callSid: CallSid 
         });
         
     } else if (Digits === '3') {
-        twiml.say('Leave message after beep.');
+        // Voicemail with beep
+        twiml.say('Leave your message after the beep.');
         twiml.pause({ length: 1 });
         twiml.play('http://www.twilio.com/docs/demos/show_mail_beep');
         const gather = twiml.gather({
@@ -145,17 +149,17 @@ app.post('/menu', (req, res) => {
 });
 
 // ============================================
-// HOURLY - GET PICKUP
+// HOURLY - PICKUP
 // ============================================
-app.post('/hourly-get-pickup', (req, res) => {
+app.post('/hourly-pickup', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
     const CallSid = req.body.CallSid;
     const call = activeCalls.get(CallSid);
     
     if (!SpeechResult) {
         const twiml = new twilio.twiml.VoiceResponse();
-        const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/hourly-get-pickup', method: 'POST' });
-        gather.say('Pickup again?');
+        const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/hourly-pickup', method: 'POST' });
+        gather.say('Please say your pickup address again.');
         res.type('text/xml');
         return res.send(twiml.toString());
     }
@@ -164,16 +168,16 @@ app.post('/hourly-get-pickup', (req, res) => {
     activeCalls.set(CallSid, call);
     
     const twiml = new twilio.twiml.VoiceResponse();
-    const gather = twiml.gather({ input: 'speech dtmf', timeout: 5, action: '/get-hours', method: 'POST' });
-    gather.say('Hours needed?');
+    const gather = twiml.gather({ input: 'speech dtmf', timeout: 8, action: '/hourly-hours', method: 'POST' });
+    gather.say('How many hours do you need?');
     res.type('text/xml');
     res.send(twiml.toString());
 });
 
 // ============================================
-// GET HOURS
+// HOURLY - HOURS
 // ============================================
-app.post('/get-hours', (req, res) => {
+app.post('/hourly-hours', (req, res) => {
     const Digits = req.body.Digits;
     const SpeechResult = req.body.SpeechResult;
     const CallSid = req.body.CallSid;
@@ -193,60 +197,50 @@ app.post('/get-hours', (req, res) => {
     activeCalls.set(CallSid, call);
     
     const twiml = new twilio.twiml.VoiceResponse();
-    const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-datetime', method: 'POST' });
-    gather.say(`$${call.price} for ${hours} hours. Pickup date and time?`);
+    const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/hourly-datetime', method: 'POST' });
+    gather.say(`$${call.price.toFixed(0)} for ${hours} hours. Please tell me your pickup date and time.`);
     res.type('text/xml');
     res.send(twiml.toString());
 });
 
 // ============================================
-// GET DATE/TIME
+// HOURLY - DATETIME
 // ============================================
-app.post('/get-datetime', (req, res) => {
+app.post('/hourly-datetime', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
     const CallSid = req.body.CallSid;
     const call = activeCalls.get(CallSid);
     
     if (!SpeechResult) {
         const twiml = new twilio.twiml.VoiceResponse();
-        const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-datetime', method: 'POST' });
-        gather.say('Date and time?');
+        const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/hourly-datetime', method: 'POST' });
+        gather.say('Please tell me your pickup date and time again.');
         res.type('text/xml');
         return res.send(twiml.toString());
     }
     
     call.datetime = SpeechResult;
+    activeCalls.set(CallSid, call);
     
-    if (call.serviceType === 'hourly') {
-        activeCalls.set(CallSid, call);
-        const twiml = new twilio.twiml.VoiceResponse();
-        const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-agenda', method: 'POST' });
-        gather.say('Purpose of trip?');
-        res.type('text/xml');
-        return res.send(twiml.toString());
-    } else {
-        call.step = 'name';
-        activeCalls.set(CallSid, call);
-        const twiml = new twilio.twiml.VoiceResponse();
-        const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-name', method: 'POST' });
-        gather.say('Your name?');
-        res.type('text/xml');
-        res.send(twiml.toString());
-    }
+    const twiml = new twilio.twiml.VoiceResponse();
+    const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/hourly-agenda', method: 'POST' });
+    gather.say('What will you be doing during this trip?');
+    res.type('text/xml');
+    res.send(twiml.toString());
 });
 
 // ============================================
-// GET AGENDA (Hourly)
+// HOURLY - AGENDA
 // ============================================
-app.post('/get-agenda', (req, res) => {
+app.post('/hourly-agenda', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
     const CallSid = req.body.CallSid;
     const call = activeCalls.get(CallSid);
     
     if (!SpeechResult) {
         const twiml = new twilio.twiml.VoiceResponse();
-        const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-agenda', method: 'POST' });
-        gather.say('Purpose again?');
+        const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/hourly-agenda', method: 'POST' });
+        gather.say('Please tell me your trip purpose again.');
         res.type('text/xml');
         return res.send(twiml.toString());
     }
@@ -255,14 +249,14 @@ app.post('/get-agenda', (req, res) => {
     activeCalls.set(CallSid, call);
     
     const twiml = new twilio.twiml.VoiceResponse();
-    const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-name', method: 'POST' });
-    gather.say('Your name?');
+    const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/get-name', method: 'POST' });
+    gather.say('Please tell me your name.');
     res.type('text/xml');
     res.send(twiml.toString());
 });
 
 // ============================================
-// ONE WAY - GET PICKUP
+// ONE WAY - PICKUP
 // ============================================
 app.post('/get-pickup', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
@@ -271,8 +265,8 @@ app.post('/get-pickup', (req, res) => {
     
     if (!SpeechResult) {
         const twiml = new twilio.twiml.VoiceResponse();
-        const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-pickup', method: 'POST' });
-        gather.say('Pickup again?');
+        const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/get-pickup', method: 'POST' });
+        gather.say('Please say your pickup address again.');
         res.type('text/xml');
         return res.send(twiml.toString());
     }
@@ -281,14 +275,14 @@ app.post('/get-pickup', (req, res) => {
     activeCalls.set(CallSid, call);
     
     const twiml = new twilio.twiml.VoiceResponse();
-    const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-destination', method: 'POST' });
-    gather.say('Destination?');
+    const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/get-destination', method: 'POST' });
+    gather.say('Please tell me your destination.');
     res.type('text/xml');
     res.send(twiml.toString());
 });
 
 // ============================================
-// ONE WAY - GET DESTINATION
+// ONE WAY - DESTINATION
 // ============================================
 app.post('/get-destination', async (req, res) => {
     const SpeechResult = req.body.SpeechResult;
@@ -297,15 +291,14 @@ app.post('/get-destination', async (req, res) => {
     
     if (!SpeechResult) {
         const twiml = new twilio.twiml.VoiceResponse();
-        const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-destination', method: 'POST' });
-        gather.say('Destination again?');
+        const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/get-destination', method: 'POST' });
+        gather.say('Please say your destination again.');
         res.type('text/xml');
         return res.send(twiml.toString());
     }
     
     call.destination = SpeechResult;
     
-    // Get distance (with timeout)
     const distance = await getDistance(call.pickup, call.destination);
     const price = calculatePrice(distance);
     call.distance = distance;
@@ -313,14 +306,40 @@ app.post('/get-destination', async (req, res) => {
     activeCalls.set(CallSid, call);
     
     const twiml = new twilio.twiml.VoiceResponse();
-    const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-datetime', method: 'POST' });
-    gather.say(`${distance.toFixed(0)} miles, $${price.toFixed(0)}. Date and time?`);
+    const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/oneway-datetime', method: 'POST' });
+    gather.say(`${distance.toFixed(0)} miles, $${price.toFixed(0)}. Please tell me your pickup date and time.`);
     res.type('text/xml');
     res.send(twiml.toString());
 });
 
 // ============================================
-// GET NAME
+// ONE WAY - DATETIME
+// ============================================
+app.post('/oneway-datetime', (req, res) => {
+    const SpeechResult = req.body.SpeechResult;
+    const CallSid = req.body.CallSid;
+    const call = activeCalls.get(CallSid);
+    
+    if (!SpeechResult) {
+        const twiml = new twilio.twiml.VoiceResponse();
+        const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/oneway-datetime', method: 'POST' });
+        gather.say('Please tell me your pickup date and time again.');
+        res.type('text/xml');
+        return res.send(twiml.toString());
+    }
+    
+    call.datetime = SpeechResult;
+    activeCalls.set(CallSid, call);
+    
+    const twiml = new twilio.twiml.VoiceResponse();
+    const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/get-name', method: 'POST' });
+    gather.say('Please tell me your name.');
+    res.type('text/xml');
+    res.send(twiml.toString());
+});
+
+// ============================================
+// GET NAME (Common)
 // ============================================
 app.post('/get-name', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
@@ -329,8 +348,8 @@ app.post('/get-name', (req, res) => {
     
     if (!SpeechResult) {
         const twiml = new twilio.twiml.VoiceResponse();
-        const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-name', method: 'POST' });
-        gather.say('Name again?');
+        const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/get-name', method: 'POST' });
+        gather.say('Please tell me your name again.');
         res.type('text/xml');
         return res.send(twiml.toString());
     }
@@ -339,8 +358,8 @@ app.post('/get-name', (req, res) => {
     activeCalls.set(CallSid, call);
     
     const twiml = new twilio.twiml.VoiceResponse();
-    const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-email', method: 'POST' });
-    gather.say('Email? Say john at gmail dot com');
+    const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/get-email', method: 'POST' });
+    gather.say('Please tell me your email. Say john at gmail dot com.');
     res.type('text/xml');
     res.send(twiml.toString());
 });
@@ -355,8 +374,8 @@ app.post('/get-email', async (req, res) => {
     
     if (!SpeechResult) {
         const twiml = new twilio.twiml.VoiceResponse();
-        const gather = twiml.gather({ input: 'speech', timeout: 5, action: '/get-email', method: 'POST' });
-        gather.say('Email again?');
+        const gather = twiml.gather({ input: 'speech', timeout: 8, action: '/get-email', method: 'POST' });
+        gather.say('Please tell me your email again.');
         res.type('text/xml');
         return res.send(twiml.toString());
     }
@@ -392,7 +411,7 @@ app.post('/get-email', async (req, res) => {
     }
     
     const twiml = new twilio.twiml.VoiceResponse();
-    twiml.say(`Thanks ${call.customerName}! ${bookingCode} confirmed. $${call.price}. Invoice to ${email}. Goodbye.`);
+    twiml.say(`Thank you ${call.customerName}! Booking ${bookingCode} confirmed. $${call.price.toFixed(0)}. Invoice to ${email}. Goodbye.`);
     twiml.hangup();
     res.type('text/xml');
     res.send(twiml.toString());
