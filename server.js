@@ -104,14 +104,24 @@ app.post('/menu', (req, res) => {
         activeCalls.set(CallSid, { phoneNumber: From, serviceType: 'hourly', callSid: CallSid });
         
     } else if (Digits === '3') {
+        // Voicemail with beep
+        twiml.say('Leave your message after the beep.');
+        twiml.pause({ length: 1 });
+        twiml.play('http://www.twilio.com/docs/demos/show_mail_beep');
+        
         const gather = twiml.gather({
             input: 'speech',
             timeout: 30,
             action: '/voicemail',
             method: 'POST'
         });
-        gather.say('Leave your message after the beep.');
-        activeCalls.set(CallSid, { phoneNumber: From, serviceType: 'voicemail', callSid: CallSid });
+        gather.say('Recording...');
+        
+        activeCalls.set(CallSid, { 
+            phoneNumber: From, 
+            serviceType: 'voicemail', 
+            callSid: CallSid 
+        });
         
     } else {
         twiml.say('Invalid. Goodbye.');
@@ -129,21 +139,26 @@ app.post('/voicemail', (req, res) => {
     const SpeechResult = req.body.SpeechResult;
     const From = req.body.From;
     
-    console.log('Voicemail from:', From);
+    console.log('📧 VOICEMAIL RECEIVED:');
+    console.log('From:', From);
     console.log('Message:', SpeechResult);
     
+    // Send to Google Sheet
     try {
         const params = new URLSearchParams({
             type: 'voicemail',
             phoneNumber: From,
-            message: SpeechResult || 'No message',
+            message: SpeechResult || 'No message recorded',
             timestamp: new Date().toLocaleString()
         });
         axios.get(`${GOOGLE_SCRIPT_URL}?${params.toString()}`);
-    } catch(e) { console.error(e); }
+        console.log('✅ Voicemail saved to Google Sheet');
+    } catch(e) { 
+        console.error('Voicemail error:', e); 
+    }
     
     const twiml = new twilio.twiml.VoiceResponse();
-    twiml.say('Thank you. We will return your call within 24 hours. Goodbye.');
+    twiml.say('Thank you for your message. Someone from Blu Royal Rides will return your call within 24 hours. Goodbye.');
     twiml.hangup();
     res.type('text/xml');
     res.send(twiml.toString());
@@ -295,7 +310,7 @@ app.post('/get-email', async (req, res) => {
         
         const params = new URLSearchParams(bookingData);
         await axios.get(`${GOOGLE_SCRIPT_URL}?${params.toString()}`);
-        console.log(`✅ Booking ${bookingCode}`);
+        console.log(`✅ Booking ${bookingCode} sent to Google Sheet`);
     } catch (error) {
         console.error('Sheet error:', error.message);
     }
